@@ -104,8 +104,8 @@ class Portfolio:
             
             stat.loc[dates[i], ('cash', 'weight')] = stat.loc[dates[i]][('cash', 'value')] / total_value * 100
 
-        stat.insert(0, ('rebalancing', 'flag'), False)
-        stat.loc[rebalancing_dates, ('rebalancing', 'flag')] = True
+        # stat.insert(0, ('rebalancing', 'flag'), False)
+        # stat.loc[rebalancing_dates, ('rebalancing', 'flag')] = True
 
         res_df = pd.DataFrame(columns=['portfolio'], index=['cagr', 'stdev', 'mdd', 'beta', 'alpha'])
         start_price = stat.loc[dates[0], ('total', 'value')]
