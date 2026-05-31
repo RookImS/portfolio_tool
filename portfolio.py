@@ -21,11 +21,11 @@ class Portfolio:
         self.__divend_data = self.__divend_data.droplevel(1, axis=1)
         self.__start_cash = start_cash
         # target_ratio의 구성 { stock명 : 목표 비중, ... }
-        self.target_ratio = target_ratio
-        self.buy_ratio = buy_ratio
-        self.sell_ratio = sell_ratio
-        self.__target_buy_ratio = {ticker: target_ratio[ticker] * buy_ratio / 100 for ticker in self.stock_list}
-        self.__target_sell_ratio = {ticker: target_ratio[ticker] * sell_ratio / 100 for ticker in self.stock_list}
+        self.__target_ratio = target_ratio
+        self.__buy_ratio = buy_ratio
+        self.__sell_ratio = sell_ratio
+        self.__target_buy_ratio = {ticker: target_ratio[ticker] * buy_ratio / 100 for ticker in self.__stock_list}
+        self.__target_sell_ratio = {ticker: target_ratio[ticker] * sell_ratio / 100 for ticker in self.__stock_list}
     
 
         self.__price_data.dropna(inplace=True)
@@ -48,7 +48,24 @@ class Portfolio:
     @property
     def start_date(self) -> dt.date:
         return self.__avilable_date
-
+    @property
+    def target_ratio(self) -> dict:
+        return self.__target_ratio
+    @property
+    def buy_ratio(self) -> float:
+        return self.__buy_ratio
+    @buy_ratio.setter
+    def buy_ratio(self, value):
+        self.__buy_ratio = value
+        self.__target_buy_ratio = {ticker: self.target_ratio[ticker] * value / 100 for ticker in self.stock_list}
+    @property
+    def sell_ratio(self) -> float:
+        return self.__sell_ratio
+    @sell_ratio.setter
+    def sell_ratio(self, value):
+        self.__sell_ratio = value
+        self.__target_sell_ratio = {ticker: self.target_ratio[ticker] * value / 100 for ticker in self.stock_list}
+    
     def backtest(self, start_date=None, duration=None, rebalancing_cycle=None, benchmark=None):
         info_list =  ['price', 'number', 'value', 'weight']
         stock_info =  list(itertools.product(self.stock_list, info_list))
