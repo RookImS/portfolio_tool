@@ -66,7 +66,7 @@ class Portfolio:
         self.__sell_ratio = value
         self.__target_sell_ratio = {ticker: self.target_ratio[ticker] * value / 100 for ticker in self.stock_list}
     
-    def backtest(self, start_date=None, duration=None, rebalancing_cycle=None, benchmark=None):
+    def backtest(self, start_date=None, duration=None, rebalancing_cycle=1, cash_flow=0, cash_flow_growth=3, cash_flow_cycle=None, benchmark=None):
         info_list =  ['price', 'number', 'value', 'weight']
         stock_info =  list(itertools.product(self.stock_list, info_list))
 
@@ -74,7 +74,9 @@ class Portfolio:
         col = pd.MultiIndex.from_tuples(col)
 
         dates = self.__available_dates(start_date, duration)
-        rebalancing_dates = dates[::rebalancing_cycle] if rebalancing_cycle else dates
+        rebalancing_dates = dates[::rebalancing_cycle]
+        cash_flow_dates = dates[::cash_flow_cycle] if cash_flow_cycle else rebalancing_dates
+        cash_flow_growth_rate = cash_flow_growth * 0.01
         stat = pd.DataFrame(columns=col, index=dates)
 
         # 첫 값 설정
@@ -90,6 +92,12 @@ class Portfolio:
         for i in range(1, len(dates)):
             cash_value = stat.loc[dates[i - 1]][('cash', 'value')]
             total_value = cash_value
+            # 현금 흐름 처리
+            if cash_flow != 0:
+                if i % 252 == 0:
+                    cash_flow = cash_flow * (1 + cash_flow_growth_rate)
+                if dates[i] in cash_flow_dates:
+                    cash_value += cash_flow
             # 가격 변동 처리
             prev_num = stat.loc[dates[i - 1]][:, 'number']
             prev_num_pv = prev_num * self.price_data.loc[dates[i]]
@@ -204,7 +212,7 @@ class Portfolio:
         alphabeta_df = pd.DataFrame(columns=tickers, index=['alpha', 'beta'])
         for ticker in tickers:
             target_value = self.adj_price_data.loc[self.__available_dates(start_date, duration), ticker]
-            alpha, beta = Portfolio.alphabeta(market_value, target_value)
+            alpha, beta = Portfolio.alphabeta(market_value, target_value, risk_free_rate, duration)
             alphabeta_df.loc['alpha', ticker] = alpha
             alphabeta_df.loc['beta', ticker] = beta
 
