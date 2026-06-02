@@ -90,71 +90,105 @@ class Portfolio:
             history.loc[first_date, ('cash', 'weight')] = 0
             history.loc[:, (ticker, 'price')] = self.price_data[ticker]
             history.loc[first_date, (history.columns.get_level_values(0) == ticker) & (history.columns.get_level_values(1) != 'price')] = self.__ideal_nvw(total_value, ticker, first_date)
-            
-        history_np = history.to_numpy()
+        
+        # numpy 연산을 위해 필요한 데이터들
+        rebalancing_dates_idx = list(reversed(range(0, len(dates), rebalancing_cycle)))
+        cash_flow_dates_idx = list(reversed(range(0, len(dates), cash_flow_cycle))) if cash_flow_cycle else rebalancing_dates_idx.copy()
+        history_np = history.to_numpy(copy=True)
         price_np = (self.price_data.loc[dates]).to_numpy()
-        np_idx = { x:i for i, x in enumerate(col_tuple) }
+        col_np_idx = { x:i for i, x in enumerate(col_tuple) }
+        target_ratio_np = pd.Series(self.target_ratio).to_numpy()
+        sell_ratio_np = pd.Series(self.__target_sell_ratio).to_numpy()
+        buy_ratio_np = pd.Series(self.__target_buy_ratio).to_numpy()
 
         for i in range(1, len(dates)):
             # cash_value = history.loc[dates[i - 1]][('cash', 'value')]
-            cash_value = history_np[i - 1][np_idx[('cash', 'value')]]
+            cash_value = history_np[i - 1][col_np_idx[('cash', 'value')]]
             total_value = cash_value
             # 현금 흐름 처리
             if cash_flow != 0:
                 if i % 252 == 0:
                     cash_flow = cash_flow * (1 + cash_flow_growth_rate)
-                if dates[i] in cash_flow_dates:
+                if not cash_flow_dates_idx and i == cash_flow_dates_idx[-1]:
+                    cash_flow_dates_idx.pop()
                     cash_value += cash_flow
             # 가격 변동 처리
             # prev_num = history.loc[dates[i - 1]][:, 'number']
-            # prev_num_pv = prev_num * self.price_data.loc[dates[i]]
-            prev_num = history_np[i - 1][4::4]
-            prev_num_pv = prev_num * price_np[i]
-            total_value += prev_num_pv.sum()
+            # prev_num_value = prev_num * self.price_data.loc[dates[i]]
+            prev_num = history_np[i - 1][col_np_idx[(self.stock_list[0], 'number')]::4]
+            prev_num_value = prev_num * price_np[i]
+            total_value += prev_num_value.sum()
             # 배당금 처리
             divend_df = self.acculate_divend(dates[i-1], dates[i])
             divend = (divend_df.sum() * prev_num).sum()
             cash_value += divend
             total_value += divend
-            history.loc[dates[i], ('cash', 'value')] = cash_value
-            history.loc[dates[i], ('total', 'value')] = total_value
+            # history.loc[dates[i], ('cash', 'value')] = cash_value
+            # history.loc[dates[i], ('total', 'value')] = total_value
+            history_np[i][col_np_idx[('cash', 'value')]] = cash_value
+            history_np[i][col_np_idx[('total', 'value')]] = total_value
 
             # 변동에 따른 리밸런싱 계산
-            prev_num_ratio = prev_num_pv / total_value * 100
-            target_ratio_sr = pd.Series(self.target_ratio)
-            ratio_diff = (prev_num_ratio - target_ratio_sr)
+            # prev_num_ratio = prev_num_value / total_value * 100
+            # target_ratio_sr = pd.Series(self.target_ratio)
+            # ratio_diff = (prev_num_ratio - target_ratio_sr)
+            prev_num_ratio = prev_num_value / total_value * 100
 
-            need_sell = ratio_diff[ratio_diff >= pd.Series(self.__target_sell_ratio)].index.to_list()
-            need_buy = ratio_diff[ratio_diff <= -pd.Series(self.__target_buy_ratio)].index.to_list()
-            need_trade = need_sell + need_buy
-            for ticker in self.stock_list:
-                if dates[i] in rebalancing_dates and ticker in need_trade:
-                    history.loc[dates[i], (history.columns.get_level_values(0) == ticker) & (history.columns.get_level_values(1) != 'price')] = self.__ideal_nvw(total_value, ticker, dates[i])
-                    history.loc[dates[i], ('cash', 'value')] += ratio_diff[ticker] * total_value * 0.01
+            # need_sell = ratio_diff[ratio_diff >= pd.Series(self.__target_sell_ratio)].index.to_list()
+            # need_buy = ratio_diff[ratio_diff <= -pd.Series(self.__target_buy_ratio)].index.to_list()
+            # need_trade = need_sell + need_buy
+            # for ticker in self.stock_list:
+            #     if dates[i] in rebalancing_dates and ticker in need_trade:
+            #         history.loc[dates[i], (history.columns.get_level_values(0) == ticker) & (history.columns.get_level_values(1) != 'price')] = self.__ideal_nvw(total_value, ticker, dates[i])
+            #         history.loc[dates[i], ('cash', 'value')] += ratio_diff[ticker] * total_value * 0.01
+            #     else:
+            #         history.loc[dates[i], (ticker, 'number')] = history.loc[dates[i - 1], (ticker, 'number')]
+            #         history.loc[dates[i], (ticker, 'value')] = prev_num_value[ticker]
+            #         history.loc[dates[i], (ticker, 'weight')] = prev_num_ratio[ticker]
+        
+            ratio_diff = None
+            need_trade = np.array([False] * len(self.stock_list))
+            if not rebalancing_dates_idx and i == rebalancing_dates_idx[-1]:
+                rebalancing_dates_idx.pop()
+                ratio_diff = (prev_num_ratio - target_ratio_np)
+                need_sell = ratio_diff >= sell_ratio_np
+                need_buy = ratio_diff <= -buy_ratio_np
+                need_trade = need_sell | need_buy
+
+            for ticker_idx in range(len(self.stock_list)):
+                if need_trade[ticker_idx]:
+                    nvw = self.__ideal_nvw(total_value, self.stock_list[ticker_idx], dates[i])
+                    history_np[i][col_np_idx[(self.stock_list[ticker_idx], 'number')]] = nvw[0]
+                    history_np[i][col_np_idx[(self.stock_list[ticker_idx], 'value')]] = nvw[1]
+                    history_np[i][col_np_idx[(self.stock_list[ticker_idx], 'weight')]] = nvw[2]
+                    history_np[i][col_np_idx[('cash', 'value')]] += ratio_diff[ticker_idx] * total_value * 0.01
                 else:
-                    history.loc[dates[i], (ticker, 'number')] = history.loc[dates[i - 1], (ticker, 'number')]
-                    history.loc[dates[i], (ticker, 'value')] = prev_num_pv[ticker]
-                    history.loc[dates[i], (ticker, 'weight')] = prev_num_ratio[ticker]
-            
-            history.loc[dates[i], ('cash', 'weight')] = history.loc[dates[i]][('cash', 'value')] / total_value * 100
+                    history_np[i][col_np_idx[(self.stock_list[ticker_idx], 'number')]] = history_np[i - 1][col_np_idx[(self.stock_list[ticker_idx], 'number')]]
+                    history_np[i][col_np_idx[(self.stock_list[ticker_idx], 'value')]] = prev_num_value[ticker_idx]
+                    history_np[i][col_np_idx[(self.stock_list[ticker_idx], 'weight')]] = prev_num_ratio[ticker_idx]
+
+            history_np[i][col_np_idx[('cash', 'weight')]] = history_np[i][col_np_idx[('cash', 'value')]] / total_value * 100
+            # history.loc[dates[i], ('cash', 'weight')] = history.loc[dates[i]][('cash', 'value')] / total_value * 100
 
         # history.insert(0, ('rebalancing', 'flag'), False)
         # history.loc[rebalancing_dates, ('rebalancing', 'flag')] = True
 
-        stat = pd.DataFrame(columns=['portfolio'], index=['cagr', 'stdev', 'mdd', 'beta', 'alpha'])
-        start_price = history.loc[dates[0], ('total', 'value')]
-        end_price = history.loc[dates[-1], ('total', 'value')]
-        stat.loc['cagr', 'portfolio'] = ((end_price / start_price) ** (252 / len(dates)) - 1) * 100
-        stat.loc['stdev', 'portfolio'] = history.loc[:, ('total', 'value')].pct_change().std() * np.sqrt(252) * 100
-        peak_value = history[('total', 'value')].cummax()
-        drawdown = (history[('total', 'value')] - peak_value) / peak_value
-        stat.loc['mdd', 'portfolio'] = -1 * drawdown.min() * 100
-        if benchmark is not None:
-            alpha, beta = Portfolio.alphabeta(benchmark, history.loc[:, ('total', 'value')], duration=duration)
-            stat.loc['alpha', 'portfolio'] = alpha
-            stat.loc['beta', 'portfolio'] = beta
+        # stat = pd.DataFrame(columns=['portfolio'], index=['cagr', 'stdev', 'mdd', 'beta', 'alpha'])
+        # start_price = history.loc[dates[0], ('total', 'value')]
+        # end_price = history.loc[dates[-1], ('total', 'value')]
+        # stat.loc['cagr', 'portfolio'] = ((end_price / start_price) ** (252 / len(dates)) - 1) * 100
+        # stat.loc['stdev', 'portfolio'] = history.loc[:, ('total', 'value')].pct_change().std() * np.sqrt(252) * 100
+        # peak_value = history[('total', 'value')].cummax()
+        # drawdown = (history[('total', 'value')] - peak_value) / peak_value
+        # stat.loc['mdd', 'portfolio'] = -1 * drawdown.min() * 100
+        # if benchmark is not None:
+        #     alpha, beta = Portfolio.alphabeta(benchmark, history.loc[:, ('total', 'value')], duration=duration)
+        #     stat.loc['alpha', 'portfolio'] = alpha
+        #     stat.loc['beta', 'portfolio'] = beta
 
-        return history, stat
+        print(history_np)
+        print(history_np.shape)
+        return history
 
     # 범위는 (start_date, end_date]
     def acculate_divend(self, start_date, end_date):
